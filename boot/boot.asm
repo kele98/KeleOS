@@ -72,18 +72,18 @@ s1:
 	cmp ax,0x4f42
 	jne next
 	mov ax,[bx+2]
-	cmp ax,0x54f2
+	cmp ax,0x544f
 	jne next
 	mov ax,[bx+4]
 	cmp ax,0x2020
 	jne next
-	mov ax,[bx+8]
+	mov ax,[bx+6]
 	cmp ax,0x2020
 	jne next
-	mov ax,[bx+10]
+	mov ax,[bx+8]
 	cmp ax,0x5341
 	jne next
-	mov al,[bx+12]
+	mov al,[bx+10]
 	cmp al,0x4d
 	jne next
 	;执行到这里说明找到了
@@ -92,10 +92,10 @@ s1:
 	mov ax,cs
 	mov es,ax
 	mov ax,1301h
+	mov bp,bx
 	mov bx,000fh
 	mov cx,15
 	mov dx,0
-	mov bp,bx
 	int 10h
 	jmp $
 next:
@@ -130,7 +130,6 @@ readSector:
 	;2使用lba28访问硬盘 将扇区号写入0x1f3到0x1f6四个端口中
 	mov dx,0x1f3
 	mov al,cl
-	mov al,0x00
 	out dx,al
 	inc dx
 	;0x1f4
