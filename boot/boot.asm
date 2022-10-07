@@ -29,6 +29,8 @@ org 0x7c00
 	RootDirStartSectors equ 19
 	;fat表起始扇区 
 	Fat1Sectors equ 1
+	;数据区起始扇区
+	DataSectors equ 31
 
 Label_Start:
 	mov ax,0x7c00
@@ -46,16 +48,7 @@ Label_Start:
 	int 13h
 	;读取数据
 	call find_load_inRoot
-	;显示文字
-	mov ax,cs
-	mov es,ax
-	mov ax,1301h
-	mov bx,000fh
-	mov cx,13
-	mov dx,0
-	mov bp,boot_Message
-	int 10h
-	jmp $
+
 
 	;读取根目录扇区并寻找对应文件
 find_load_inRoot:
@@ -69,13 +62,13 @@ call readSector
 	mov cx,16
 s1:
 	mov ax,[bx]
-	cmp ax,0x4f42
+	cmp ax,0x4f4c
 	jne next
 	mov ax,[bx+2]
-	cmp ax,0x544f
+	cmp ax,0x4441
 	jne next
 	mov ax,[bx+4]
-	cmp ax,0x2020
+	cmp ax,0x5245
 	jne next
 	mov ax,[bx+6]
 	cmp ax,0x2020
@@ -92,9 +85,9 @@ s1:
 	call getFat
 	;上个函数的出参是di
 	;将数据写到指定位置
-	call writeLoader
 	;跳转
-	jmp BaseOfLoader:OffsetOfLoader
+	ret
+	;jmp BaseOfLoader:OffsetOfLoader
 
 next:
 	;寻找下一行
@@ -178,8 +171,11 @@ readw:
 	;出参dl是压栈的数量
 getFat:
 	;获取ax所在的fat区块
+	mov ah,0
+	push ax
 	mov ah,12
 	mul ah
+	push ax
 	mov bx,512
 	mov dx,0
 	div bx
@@ -193,64 +189,97 @@ getFat:
 	mov bx,readtext
 	mov al,1
 	call readSector
-	mov di,0
-	;开始解析并记录簇数据
-	push dx
-	mov bx,dx
-	inc di
-	;读取前两个个字节
-s3:	mov ax,[bx]
-	;去掉高位 这时候ax的值就是下个簇号
-	and ax,0x0fff
-	cmp ax,0x0fff
-	;寻找结束
-	je ret1
-	;放入数据
-	push ax
-	inc di
-	;读取后两个字节
-	mov ax,[bx+1]
-	;去掉最低位
+	;开始解析并记录簇数据 这个dx是簇号*12
+	pop dx
+	mov dh,0
+	mov di,1
+	;判断簇号的奇偶
+s3:	mov ax,dx
+	mov dl,8
+	div dl
+	cmp ah,0
+	je even
+	;是奇数
+	mov ah,0
+	mov si,ax
+	mov ax,[bx+si]
 	shr ax,4
-	cmp ax,0xfff
-	je ret1
-	;放入数据
+	;判断是否找到结束位置
+	cmp ax,0x0fff
+	je writeLoader
 	push ax
 	inc di
-	;走到这里说明没读完
-	add bx,3
-	;当前扇区读完了 需要去下个扇区继续 这里先用报错解决
-	cmp bx,510
-	je loaderNotFound
-	;跳转
+	mov dl,12
+	mul dl
+	mov dx,ax
 	jmp s3
+even:
+	mov ah,0
+	mov si,ax
+	mov ax,[bx+si]
+	and ax,0x0fff
+	;判断是否找到结束位置
+	cmp ax,0x0fff
+	je writeLoader
+	push ax
+	inc di
+	mov dl,12
+	mul dl
+	mov dx,ax
+	jmp s3
+	;此时ax的值就等于下个簇
 ret1:ret
 writeLoader:
-	;di就是簇号
-	;读取区块
+	;di就是压栈的次数
+	;循环取出栈中数据复制到缓存区域
+	mov cx,di
+	mov si,0
+s4:
+	mov ax,di
+	sub ax,1
+	mov bl,2
+	mul bl
+	mov bx,vartemp
+	add bx,ax
+	pop ax
+	mov [bx+si],ax
+	sub si,2
+	loop s4
+	;这个时候再去读数据并写入
 	;al表示读取扇区数量
 	;bx表示偏移位置
 	;cl表示读取扇区起始号
-	mov al,1
+	mov cx,di
+	mov si,0
 	mov bx,readtext
-	;获取簇号
-s5:	pop cx
-	sub di,1
-	add cx,31
+s5:
+	push bx
+	mov bx,vartemp
+	mov ax,[bx+si]
+	pop bx
+	push cx
+	mov cx,DataSectors
+	add cx,ax
+	mov al,1
 	call readSector
-s4:
+	pop cx
+	;读完数据开始写数据
+	push si
+	mov bx,0
 	mov ax,BaseOfLoader
 	mov es,ax
-	mov si,0
-	mov ax,[bx]
-	mov es:[si],ax
+	mov di,OffsetOfLoader
+	mov si,readtext
+s6:	mov ax,ds:[si+bx]
+	mov es:[di+bx],ax
 	add bx,2
+	cmp bx,512
+	jne s6
+	pop si
 	add si,2
-	cmp bx,510
-	jne s4
-	cmp di,0
-	jne s5
-	ret
+	loop s5
+	;长跳转控制权交给loader
+	jmp BaseOfLoader:OffsetOfLoader
 loaderNotFound:
 	mov ax,cs
 	mov es,ax
@@ -263,10 +292,15 @@ loaderNotFound:
 	jmp $
 	ret
 boot_Message:
-db "KeleOS boot~"
+db "KeleOS boot"
 load_not_found:
-db "load_not_found!"
+db "load_fail"
 times 510-($-$$) db 0
 db 0x55,0xaa
+hold:
+db 1024 dup (0)
+vartemp:
+dw 10 dup (0)
 readtext:
 db 512 dup (0) 
+
