@@ -81,23 +81,21 @@ s1:
 	cmp ax,0x2020
 	jne next
 	mov ax,[bx+8]
-	cmp ax,0x5341
+	cmp ax,0x4942
 	jne next
 	mov al,[bx+10]
-	cmp al,0x4d
+	cmp al,0x4e
 	jne next
-	;执行到这里说明找到了
-	;当前的bx位置就是起始位置
-	;先执行一个显示看看
-	mov ax,cs
-	mov es,ax
-	mov ax,1301h
-	mov bp,bx
-	mov bx,000fh
-	mov cx,15
-	mov dx,0
-	int 10h
-	jmp $
+	;执行到这里说明找到了 获取起始簇号
+	mov al,[bx+26]
+	;调用函数解析fat表
+	call getFat
+	;上个函数的出参是di
+	;将数据写到指定位置
+	call writeLoader
+	;跳转
+	jmp BaseOfLoader:OffsetOfLoader
+
 next:
 	;寻找下一行
 	add bx,32
@@ -175,6 +173,83 @@ readw:
 	pop cx
 	pop bx
 	pop ax
+	ret
+	;入参al传入簇号 并解析
+	;出参dl是压栈的数量
+getFat:
+	;获取ax所在的fat区块
+	mov ah,12
+	mul ah
+	mov bx,512
+	mov dx,0
+	div bx
+	;此时ax就是区块号 dx就是偏移地址
+	;读取区块
+	;al表示读取扇区数量
+	;bx表示偏移位置
+	;cl表示读取扇区起始号
+	mov cl,al
+	add cl,Fat1Sectors
+	mov bx,readtext
+	mov al,1
+	call readSector
+	mov di,0
+	;开始解析并记录簇数据
+	push dx
+	mov bx,dx
+	inc di
+	;读取前两个个字节
+s3:	mov ax,[bx]
+	;去掉高位 这时候ax的值就是下个簇号
+	and ax,0x0fff
+	cmp ax,0x0fff
+	;寻找结束
+	je ret1
+	;放入数据
+	push ax
+	inc di
+	;读取后两个字节
+	mov ax,[bx+1]
+	;去掉最低位
+	shr ax,4
+	cmp ax,0xfff
+	je ret1
+	;放入数据
+	push ax
+	inc di
+	;走到这里说明没读完
+	add bx,3
+	;当前扇区读完了 需要去下个扇区继续 这里先用报错解决
+	cmp bx,510
+	je loaderNotFound
+	;跳转
+	jmp s3
+ret1:ret
+writeLoader:
+	;di就是簇号
+	;读取区块
+	;al表示读取扇区数量
+	;bx表示偏移位置
+	;cl表示读取扇区起始号
+	mov al,1
+	mov bx,readtext
+	;获取簇号
+s5:	pop cx
+	sub di,1
+	add cx,31
+	call readSector
+s4:
+	mov ax,BaseOfLoader
+	mov es,ax
+	mov si,0
+	mov ax,[bx]
+	mov es:[si],ax
+	add bx,2
+	add si,2
+	cmp bx,510
+	jne s4
+	cmp di,0
+	jne s5
 	ret
 loaderNotFound:
 	mov ax,cs
